@@ -5,15 +5,20 @@ class Platformer extends Phaser.Scene {
 
     init() {
         // variables and settings
-        this.ACCELERATION = 400;
-        this.MAXSPEED = 300;
-        this.DRAG = 500;    // DRAG < ACCELERATION = icy slide
+        this.ACCELERATION = 500;
+        this.MAXSPEED = 200;
+        this.DRAG = 700;    // DRAG < ACCELERATION = icy slide
         this.physics.world.gravity.y = 1500;
-        this.JUMP_VELOCITY = -600;
+        this.JUMP_VELOCITY = -500;
         this.PARTICLE_VELOCITY = 50;
         this.SCALE = 2.0;
+        this.DASHPOWER = 300;
         
         this.CHECKPOINT = [0, 0]; 
+
+        this.DASHENABLED = false; // whether player can dash, updated when they collect the diamond
+
+        this.DISABLEMOVEMENT = false; // used for dramatic diamond pickup
     }
 
     create() {
@@ -41,15 +46,32 @@ class Platformer extends Phaser.Scene {
             key: "tilemap_sheet",
             frame: 151 //tile on tilesheet
         });
+        //add diamond to coins array so it can be handled by the same collision handler
+        this.coins.push(this.map.createFromObjects("Objects", {
+            name: "diamond",
+            key: "tilemap_sheet",
+            frame: 67 //tile on tilesheet
+        })[0]);
+
+
+        // Create spikes from Objects layer in tilemap
+        this.spikes = this.map.createFromObjects("Objects", {
+            name: "spike",
+            key: "tilemap_sheet",
+            frame: 68 //tile on tilesheet
+        });
 
         this.playerSpawn = this.map.findObject("Objects", obj => obj.name === "playerSpawn");
         this.CHECKPOINT = [this.playerSpawn.x, this.playerSpawn.y];
 
+        //Enable physics on coins and spikes
         this.physics.world.enable(this.coins, Phaser.Physics.Arcade.STATIC_BODY);
+        this.physics.world.enable(this.spikes, Phaser.Physics.Arcade.STATIC_BODY);
 
-        // Create a Phaser group out of the array this.coins
+        // Create a Phaser group out of the arrays
         // This will be used for collision detection below.
         this.coinGroup = this.add.group(this.coins);
+        this.spikeGroup = this.add.group(this.spikes);
 
         // Find water tiles
         this.waterTiles = this.groundLayer.filterTiles(tile => {
@@ -110,26 +132,46 @@ class Platformer extends Phaser.Scene {
 
         // Coin collision handler
         this.physics.add.overlap(my.sprite.player, this.coinGroup, (obj1, obj2) => {
+            if (obj2.name === "diamond") {
+                this.collectDiamond();
+            }
+            
             obj2.destroy(); // remove coin on overlap
             ////////////////////
             // TODO: start the coin collect particle effect here
             ////////////////////
+
+
             coinVfx.x = my.sprite.player.x + 3;
             coinVfx.y = my.sprite.player.y - 10;
 
             coinVfx.start();
         });
 
+        //spike collision handler
+        this.physics.add.overlap(my.sprite.player, this.spikeGroup, (obj1, obj2) => {
+            //half tile collision detection (vertically)
+            if (my.sprite.player.y < obj2.y - obj2.height / 2) {
+                return;
+            }
+
+            this.killPlayer();
+        });
+
         // set up Phaser-provided cursor key input
         cursors = this.input.keyboard.createCursorKeys();
 
         this.rKey = this.input.keyboard.addKey('R');
+        this.dKey = this.input.keyboard.addKey('D');
+        this.aKey = this.input.keyboard.addKey('A');
+        this.spaceKey = this.input.keyboard.addKey('SPACE');
+        this.sKey = this.input.keyboard.addKey('S');
 
         // debug key listener (assigned to D key)
-        this.input.keyboard.on('keydown-D', () => {
-            this.physics.world.drawDebug = this.physics.world.drawDebug ? false : true
-            this.physics.world.debugGraphic.clear()
-        }, this);
+        // this.input.keyboard.on('keydown-D', () => {
+        //     this.physics.world.drawDebug = this.physics.world.drawDebug ? false : true
+        //     this.physics.world.debugGraphic.clear()
+        // }, this);
 
         // TODO: Add movement vfx here
         
@@ -139,18 +181,43 @@ class Platformer extends Phaser.Scene {
         this.cameras.main.startFollow(my.sprite.player, true, 0.25, 0.25); // (target, [,roundPixels][,lerpX][,lerpY])
         this.cameras.main.setDeadzone(50, 50);
         this.cameras.main.setZoom(this.SCALE);
-        
-
     }
 
     update() {
-        if(cursors.left.isDown) {
+        if (my.sprite.player.y > this.map.heightInPixels) {
+            this.killPlayer();
+        }
+
+        //dash input
+        if (Phaser.Input.Keyboard.JustDown(this.sKey) && this.DASHENABLED) {
+            if (this.DISABLEMOVEMENT) {
+                this.DISABLEMOVEMENT = false;
+                this.physics.world.gravity.y = this.cachedGravity;
+
+                //TODO: hide text
+            }
+            
+            my.sprite.player.setVelocityX((my.sprite.player.flipX ? 1 : -1) * this.DASHPOWER);
+            my.sprite.player.setVelocityY(-this.DASHPOWER);
+        }
+
+        //PUT ALL NON-INPUT-RELATED UPDATES ABOVE THIS LINE (except for dash)
+
+        if (this.DISABLEMOVEMENT) {
+            return;
+        }
+
+        //PUT ALL PLAYER INPUT BELOW THIS LINE
+
+        if((cursors.left.isDown || this.aKey.isDown)
+            && my.sprite.player.body.velocity.x > -this.MAXSPEED) {
             my.sprite.player.setAccelerationX(-this.ACCELERATION);
             my.sprite.player.resetFlip();
             my.sprite.player.anims.play('walk', true);
             // TODO: add particle following code here
 
-        } else if(cursors.right.isDown) {
+        } else if((cursors.right.isDown || this.dKey.isDown)
+            && my.sprite.player.body.velocity.x < this.MAXSPEED) {
             my.sprite.player.setAccelerationX(this.ACCELERATION);
             my.sprite.player.setFlip(true, false);
             my.sprite.player.anims.play('walk', true);
@@ -160,7 +227,9 @@ class Platformer extends Phaser.Scene {
             // Set acceleration to 0 and have DRAG take over
             my.sprite.player.setAccelerationX(0);
             my.sprite.player.setDragX(this.DRAG);
-            my.sprite.player.anims.play('idle');
+            if (this.abs(my.sprite.player.body.velocity.x) < 1) {
+                my.sprite.player.anims.play('idle');
+            }
             // TODO: have the vfx stop playing
         }
 
@@ -169,15 +238,28 @@ class Platformer extends Phaser.Scene {
         if(!my.sprite.player.body.blocked.down) {
             my.sprite.player.anims.play('jump');
         }
-        if(my.sprite.player.body.blocked.down && Phaser.Input.Keyboard.JustDown(cursors.up)) {
+        if(my.sprite.player.body.blocked.down && 
+            (Phaser.Input.Keyboard.JustDown(this.spaceKey) || cursors.up.isDown)) {
             my.sprite.player.body.setVelocityY(this.JUMP_VELOCITY);
         }
 
         //restart input
         if(Phaser.Input.Keyboard.JustDown(this.rKey)) {
             //this.scene.restart();
+
+            //reset sfx??
+
             this.resetPlayer();
         }
+    }
+
+    abs(value) {
+        return value < 0 ? -value : value;
+    }
+
+    killPlayer() {
+        //kill sfx && vfx
+        this.resetPlayer();
     }
 
     resetPlayer() {
@@ -185,5 +267,17 @@ class Platformer extends Phaser.Scene {
 
         my.sprite.player.setVelocity(0, 0);
         my.sprite.player.setAcceleration(0, 0);
+    }
+
+    collectDiamond() {
+        this.DASHENABLED = true;
+
+        this.DISABLEMOVEMENT = true;
+
+        this.cachedGravity = this.physics.world.gravity.y;
+        this.physics.world.gravity.y = 0;
+
+        my.sprite.player.setVelocity(0, 0);
+        //TODO: show text
     }
 }
