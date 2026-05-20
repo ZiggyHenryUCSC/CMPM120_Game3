@@ -12,13 +12,17 @@ class Platformer extends Phaser.Scene {
         this.JUMP_VELOCITY = -500;
         this.PARTICLE_VELOCITY = 50;
         this.SCALE = 2.0;
-        this.DASHPOWER = 300;
+        this.DASHPOWER = 400;
+        this.AIRCONTROL = 0.5; // multiplier for horizontal control in the air (0 = no control, 1 = full control)
         
         this.CHECKPOINT = [0, 0]; 
 
         this.DASHENABLED = false; // whether player can dash, updated when they collect the diamond
 
         this.DISABLEMOVEMENT = false; // used for dramatic diamond pickup
+
+        this.DASHES = 1; // number of dashes player has, reset on ground
+        this.MAXDASHES = 1; // max number of dashes player can have
     }
 
     create() {
@@ -47,11 +51,16 @@ class Platformer extends Phaser.Scene {
             frame: 151 //tile on tilesheet
         });
         //add diamond to coins array so it can be handled by the same collision handler
-        this.coins.push(this.map.createFromObjects("Objects", {
+        this.coins.push(...this.map.createFromObjects("Objects", {
             name: "diamond",
             key: "tilemap_sheet",
             frame: 67 //tile on tilesheet
-        })[0]);
+        }));
+        this.coins.push(...this.map.createFromObjects("Objects", {
+            name: "checkpoint",
+            key: "tilemap_sheet",
+            frame: 112 //tile on tilesheet
+        }));
 
 
         // Create spikes from Objects layer in tilemap
@@ -105,7 +114,7 @@ class Platformer extends Phaser.Scene {
 
         // set up player avatar
         my.sprite.player = this.physics.add.sprite(this.playerSpawn.x, this.playerSpawn.y, "platformer_characters", "tile_0000.png");
-        my.sprite.player.setCollideWorldBounds(true);
+        my.sprite.player.setCollideWorldBounds(false);
 
         // Enable collision handling
         this.physics.add.collider(my.sprite.player, this.groundLayer);
@@ -134,6 +143,12 @@ class Platformer extends Phaser.Scene {
         this.physics.add.overlap(my.sprite.player, this.coinGroup, (obj1, obj2) => {
             if (obj2.name === "diamond") {
                 this.collectDiamond();
+            }
+
+            if (obj2.name === "checkpoint") {
+                this.CHECKPOINT = [obj2.x, obj2.y - obj2.height];
+
+                return; // don't destroy checkpoint
             }
             
             obj2.destroy(); // remove coin on overlap
@@ -184,18 +199,23 @@ class Platformer extends Phaser.Scene {
     }
 
     update() {
+        let grounded = my.sprite.player.body.blocked.down;
+        let aircontrolMultiplier = grounded ? 1 : this.AIRCONTROL;
+
         if (my.sprite.player.y > this.map.heightInPixels) {
             this.killPlayer();
         }
 
         //dash input
-        if (Phaser.Input.Keyboard.JustDown(this.sKey) && this.DASHENABLED) {
+        if (Phaser.Input.Keyboard.JustDown(this.sKey) && this.DASHENABLED
+            && this.DASHES > 0) {
             if (this.DISABLEMOVEMENT) {
                 this.DISABLEMOVEMENT = false;
                 this.physics.world.gravity.y = this.cachedGravity;
 
                 //TODO: hide text
             }
+            this.DASHES--;
             
             my.sprite.player.setVelocityX((my.sprite.player.flipX ? 1 : -1) * this.DASHPOWER);
             my.sprite.player.setVelocityY(-this.DASHPOWER);
@@ -211,14 +231,14 @@ class Platformer extends Phaser.Scene {
 
         if((cursors.left.isDown || this.aKey.isDown)
             && my.sprite.player.body.velocity.x > -this.MAXSPEED) {
-            my.sprite.player.setAccelerationX(-this.ACCELERATION);
+            my.sprite.player.setAccelerationX(-this.ACCELERATION * aircontrolMultiplier);
             my.sprite.player.resetFlip();
             my.sprite.player.anims.play('walk', true);
             // TODO: add particle following code here
 
         } else if((cursors.right.isDown || this.dKey.isDown)
             && my.sprite.player.body.velocity.x < this.MAXSPEED) {
-            my.sprite.player.setAccelerationX(this.ACCELERATION);
+            my.sprite.player.setAccelerationX(this.ACCELERATION * aircontrolMultiplier);
             my.sprite.player.setFlip(true, false);
             my.sprite.player.anims.play('walk', true);
             // TODO: add particle following code here
@@ -235,10 +255,13 @@ class Platformer extends Phaser.Scene {
 
         // player jump
         // note that we need body.blocked rather than body.touching b/c the former applies to tilemap tiles and the latter to the "ground"
-        if(!my.sprite.player.body.blocked.down) {
+        if(!grounded) {
             my.sprite.player.anims.play('jump');
+        } else {
+            this.DASHES = this.MAXDASHES; // reset dashes when grounded
         }
-        if(my.sprite.player.body.blocked.down && 
+
+        if(grounded && 
             (Phaser.Input.Keyboard.JustDown(this.spaceKey) || cursors.up.isDown)) {
             my.sprite.player.body.setVelocityY(this.JUMP_VELOCITY);
         }
