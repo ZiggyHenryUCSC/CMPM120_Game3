@@ -270,8 +270,8 @@ class Platformer extends Phaser.Scene {
 
         // Simple camera to follow player
         this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
-        this.cameras.main.startFollow(my.sprite.player, true, 0.25, 0.25); // (target, [,roundPixels][,lerpX][,lerpY])
-        this.cameras.main.setDeadzone(50, 50);
+        this.cameras.main.startFollow(my.sprite.player, true, 0.05, 0.05); // (target, [,roundPixels][,lerpX][,lerpY])
+        this.cameras.main.setDeadzone(5, 5);
         this.cameras.main.setZoom(this.SCALE);
     }
 
@@ -323,6 +323,8 @@ class Platformer extends Phaser.Scene {
             this.runVfx.y = my.sprite.player.y + 10;
             this.runVfx.start();
 
+            this.cameras.main.setFollowOffset(120, 0); // shift camera to the right when moving left
+
         } else if((cursors.right.isDown || this.dKey.isDown)
             && my.sprite.player.body.velocity.x < this.MAXSPEED) {
             my.sprite.player.setAccelerationX(this.ACCELERATION * aircontrolMultiplier);
@@ -332,6 +334,8 @@ class Platformer extends Phaser.Scene {
             this.runVfx.x = my.sprite.player.x + 3;
             this.runVfx.y = my.sprite.player.y + 10;
             this.runVfx.start();
+
+            this.cameras.main.setFollowOffset(-120, 0);  // shift camera to the left when moving right
 
         } else {
             // Set acceleration to 0 and have DRAG take over
