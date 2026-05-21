@@ -35,6 +35,12 @@ class Platformer extends Phaser.Scene {
         // Second parameter: key for the tilesheet (from this.load.image in Load.js)
         this.tileset = this.map.addTilesetImage("kenny_tilemap_packed", "tilemap_tiles");
 
+        //paralax layers
+        this.p2 = this.map.createLayer("p2", this.tileset, 0, 100);
+        this.p2.setScrollFactor(0.5);
+        this.p1 = this.map.createLayer("p1", this.tileset, 0, 0);
+        this.p1.setScrollFactor(0.9);
+
         // Create LAYERS
         this.bkgLayer = this.map.createLayer("Bkg", this.tileset, 0, 0);
         this.groundLayer = this.map.createLayer("Ground-n-Platforms", this.tileset, 0, 0);
@@ -56,10 +62,17 @@ class Platformer extends Phaser.Scene {
             key: "tilemap_sheet",
             frame: 67 //tile on tilesheet
         }));
+        //add checkpoints to coins array so it can be handled by the same collision handler
         this.coins.push(...this.map.createFromObjects("Objects", {
             name: "checkpoint",
             key: "tilemap_sheet",
             frame: 112 //tile on tilesheet
+        }));
+        //add final checkpoint to coins array so it can be handled by the same collision handler
+        this.coins.push(...this.map.createFromObjects("Objects", {
+            name: "final checkpoint",
+            key: "tilemap_sheet",
+            frame: 111,
         }));
 
 
@@ -111,6 +124,15 @@ class Platformer extends Phaser.Scene {
         });
        waterVfx.tint = 0xff0000;
 
+       //dash text effect
+        this.dashVfx = this.add.particles(100, 100, "dashText", {
+            scale: { start: 0.18, end: 0.22 },
+
+            //speedY: { min: -10, max: -20},
+            maxAliveParticles: 1,
+            lifespan: 10000,
+        });
+        this.dashVfx.stop();
 
         // set up player avatar
         my.sprite.player = this.physics.add.sprite(this.playerSpawn.x, this.playerSpawn.y, "platformer_characters", "tile_0000.png");
@@ -118,37 +140,90 @@ class Platformer extends Phaser.Scene {
 
         // Enable collision handling
         this.physics.add.collider(my.sprite.player, this.groundLayer);
-
-        // TODO: create coin collect particle effect here
-        // Important: make sure it's not running
+        // vfx
         let coinVfx = this.add.particles(0, 0, "kenny-particles", {
-            frame: "star_08.png",
+            frame: "star_04.png",
             scale: { start: 0.06, end: 0.07 },
-            scaleEase: "Cubic.easeIn",
+            scaleEase: "Cubic.easeOut",
 
             duration: 50,
             speedX: { min: -80, max: 80 },
             quantity: 10,
             rotate: { start:-90, end: 360 * 3 },
-            alpha: { start: 0.1, end: 0.9 },
+            alpha: { start: 1, end: 0 },
             alphaEase: "Cubic.easeOut",
+
+            lifespan: 500,
 
             speedY: { min: 0, max: -120},
             gravityY: 200,
         });
         coinVfx.stop();
 
+        this.coinVfx = coinVfx; // store in this so it can be accessed elsewhere
+
+        this.jumpVfx = this.add.particles(0, 0, "kenny-particles", {
+            frame: "smoke_03.png",
+            scale: {min: 0.02, max: 0.05},
+
+            alpha: { start: 0.9, end: 0 },
+            alphaEase: "Cubic.easeOut",
+
+            duration: 1,
+            speedX: { min: -80, max: 80 },
+            quantity: 10,
+            //rotate: { start:-90, end: 360 * 3 },
+
+            speedY: { min: 0, max: 20},
+            gravityY: 10,
+        });
+        this.jumpVfx.stop();
+
+        this.runVfx = this.add.particles(0, 0, "kenny-particles", {
+            frame: "star_02.png",
+            scale: {min: 0.02, max: 0.05},
+
+            alpha: { start: 1, end: 0 },
+            alphaEase: "Cubic.easeOut",
+
+            duration: -1,
+            speedX: { min: -80, max: 80 },
+            quantity: 1,
+            //rotate: { start:-90, end: 360 * 3 },
+            frequency: 100,
+
+            speedY: { min: 0, max: 20},
+            gravityY: -20,
+
+            lifespan: { min: 700, max: 1000 }
+        });
+        this.runVfx.stop();
 
         // Coin collision handler
         this.physics.add.overlap(my.sprite.player, this.coinGroup, (obj1, obj2) => {
             if (obj2.name === "diamond") {
                 this.collectDiamond();
-            }
 
-            if (obj2.name === "checkpoint") {
-                this.CHECKPOINT = [obj2.x, obj2.y - obj2.height];
+                
+                this.sound.play("coin");
+            }
+            else if (obj2.name === "checkpoint") {
+                let newCheckpoint = [obj2.x, obj2.y - obj2.height];
+                if (this.CHECKPOINT[0] != newCheckpoint[0] || this.CHECKPOINT[1] != newCheckpoint[1]) {
+                    this.CHECKPOINT = newCheckpoint;
+
+                    this.coinVfx.x = my.sprite.player.x + 3;
+                    this.coinVfx.y = my.sprite.player.y - 10;
+
+                    this.coinVfx.start();
+
+                    this.sound.play("coin");
+                }
 
                 return; // don't destroy checkpoint
+            }
+            else if (obj2.name === "final checkpoint") {
+                this.endLevel();
             }
             
             obj2.destroy(); // remove coin on overlap
@@ -161,6 +236,8 @@ class Platformer extends Phaser.Scene {
             coinVfx.y = my.sprite.player.y - 10;
 
             coinVfx.start();
+            
+            this.sound.play("coin");
         });
 
         //spike collision handler
@@ -214,7 +291,14 @@ class Platformer extends Phaser.Scene {
                 this.physics.world.gravity.y = this.cachedGravity;
 
                 //TODO: hide text
+                this.dashVfx.stop();
+                this.dashVfx.killAll();
             }
+            this.jumpVfx.x = my.sprite.player.x + 3;
+            this.jumpVfx.y = my.sprite.player.y + 10;
+
+            this.jumpVfx.start();
+
             this.DASHES--;
             
             my.sprite.player.setVelocityX((my.sprite.player.flipX ? 1 : -1) * this.DASHPOWER);
@@ -235,6 +319,9 @@ class Platformer extends Phaser.Scene {
             my.sprite.player.resetFlip();
             my.sprite.player.anims.play('walk', true);
             // TODO: add particle following code here
+            this.runVfx.x = my.sprite.player.x + 3;
+            this.runVfx.y = my.sprite.player.y + 10;
+            this.runVfx.start();
 
         } else if((cursors.right.isDown || this.dKey.isDown)
             && my.sprite.player.body.velocity.x < this.MAXSPEED) {
@@ -242,6 +329,9 @@ class Platformer extends Phaser.Scene {
             my.sprite.player.setFlip(true, false);
             my.sprite.player.anims.play('walk', true);
             // TODO: add particle following code here
+            this.runVfx.x = my.sprite.player.x + 3;
+            this.runVfx.y = my.sprite.player.y + 10;
+            this.runVfx.start();
 
         } else {
             // Set acceleration to 0 and have DRAG take over
@@ -251,6 +341,7 @@ class Platformer extends Phaser.Scene {
                 my.sprite.player.anims.play('idle');
             }
             // TODO: have the vfx stop playing
+            this.runVfx.stop();
         }
 
         // player jump
@@ -264,6 +355,11 @@ class Platformer extends Phaser.Scene {
         if(grounded && 
             (Phaser.Input.Keyboard.JustDown(this.spaceKey) || cursors.up.isDown)) {
             my.sprite.player.body.setVelocityY(this.JUMP_VELOCITY);
+
+            this.jumpVfx.x = my.sprite.player.x + 3;
+            this.jumpVfx.y = my.sprite.player.y + 10;
+
+            this.jumpVfx.start();
         }
 
         //restart input
@@ -301,6 +397,20 @@ class Platformer extends Phaser.Scene {
         this.physics.world.gravity.y = 0;
 
         my.sprite.player.setVelocity(0, 0);
-        //TODO: show text
+        my.sprite.player.setAcceleration(0, 0);
+
+        //show text
+        this.dashVfx.x = my.sprite.player.x;
+        this.dashVfx.y = my.sprite.player.y - my.sprite.player.height * 2;
+        this.dashVfx.start();
+
+        this.coinVfx.x = my.sprite.player.x + 3;
+            this.coinVfx.y = my.sprite.player.y - 10;
+
+            this.coinVfx.start();
+    }
+
+    endLevel()  {
+        this.scene.start("thanksScene");
     }
 }
