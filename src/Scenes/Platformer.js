@@ -122,7 +122,7 @@ class Platformer extends Phaser.Scene {
                 source: new Phaser.Geom.Rectangle(163, 410, 105, 20)
             }
         });
-       waterVfx.tint = 0xff0000;
+       waterVfx.stop();
 
        //dash text effect
         this.dashVfx = this.add.particles(100, 100, "dashText", {
@@ -271,7 +271,7 @@ class Platformer extends Phaser.Scene {
         // Simple camera to follow player
         this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
         this.cameras.main.startFollow(my.sprite.player, true, 0.05, 0.05); // (target, [,roundPixels][,lerpX][,lerpY])
-        this.cameras.main.setDeadzone(5, 5);
+        this.cameras.main.setDeadzone(20, 20);
         this.cameras.main.setZoom(this.SCALE);
     }
 
